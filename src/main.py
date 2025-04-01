@@ -6,6 +6,7 @@ import copy
 import argparse
 import wandb
 import matplotlib as plt
+import pandas as pd
 
 import config
 from models.utils import get_model
@@ -37,11 +38,9 @@ def main(args):
     generator.seed()
     transition_matrix_path = args.transition_matrix_path
     
-    if dataset == "weather":
-        P = torch.load(transition_matrix_path).to(args.dtype).to(args.device)
-        print(f"Loaded  Weather transition matrix shape: {P.shape}")
-    else:
-        P = torch.load(transition_matrix_path).to(args.dtype).to(args.device)
+    if dataset:
+        P = pd.read_csv(transition_matrix_path, index_col=0)  # Load CSV as DataFrame
+        P = torch.tensor(P.values, dtype=args.dtype, device=args.device)
         print(f"Loaded traffic transition matrix shape: {P.shape}")
 
     torch.backends.cuda.matmul.allow_tf32 = True # allows us to make sure we're able to use tensorfloat32 during training
@@ -59,6 +58,7 @@ def main(args):
     model = get_model(args).to(args.device)
     
     group_specs = model.get_parameter_group_specs()
+    group_specs = model.parameters()
     if args.opt == 'adamw':
         use_fused = (device_type == 'cuda') and ('fused' in inspect.signature(torch.optim.AdamW).parameters)
         print(f"using fused AdamW: {use_fused}")
@@ -84,8 +84,8 @@ def main(args):
         params_copy = copy.deepcopy(vars(args))
         del params_copy['device']
         wandb.init(project=args.wandb_project, name=exp_name, config=params_copy)
-    
-    ckpt_path = os.path.join(args.results_base_folder, args.dataset, args.model, exp_name)
+    dataset_dir = os.path.dirname(args.dataset)
+    ckpt_path = os.path.join(args.results_base_folder, dataset_dir, args.model, exp_name)
     if not os.path.exists(ckpt_path):
         os.makedirs(ckpt_path)
     elif os.path.isfile(os.path.join(ckpt_path, "summary.json")): # the experiment was already completed

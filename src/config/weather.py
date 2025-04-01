@@ -19,7 +19,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument('--results_base_folder', default="./exps", type=str)
     parser.add_argument('--grad_clip', default=1.0, type=float) 
     # Dataset params
-    parser.add_argument('--dataset', default='weather.csv', choices=['weather.csv','traffic.csv'])
+    parser.add_argument('--dataset', default='/content/DGMarkov-Mamba/weather.csv', choices=['/content/DGMarkov-Mamba/weather.csv','/content/DGMarkov-Mamba/traffic.csv'])
     parser.add_argument('--columns', default=6, type=int, help="Number of columns in the weather dataset")
     
     # Transition Matrix Parameters

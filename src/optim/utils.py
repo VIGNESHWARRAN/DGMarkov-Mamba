@@ -177,53 +177,60 @@ def eval(model, P, sequence_length, batch_size, extra_args, max_num_batches=24, 
 
     return val_acc, val_loss, val_perplexity
 
-    return val_acc, val_loss, val_perplexity
-
 
 @torch.no_grad()
-def eval_probs(model, P, type, order, sequence_length, windows, generator, extra_args, betas = None, input_seq=None, output_seq=None, ctx=nullcontext()):
-    assert model.training == False
-    assert P is not None
+def eval_probs(model, P, sequence_length, windows, extra_args, betas=None, input_seq=None, output_seq=None, ctx=nullcontext()):
+    """
+    Evaluates model probability estimates on weather data.
+    - model: Trained PyTorch model.
+    - P: Precomputed transition matrix.
+    - sequence_length: Input sequence length.
+    - windows: Context window sizes for empirical estimation.
+    - extra_args: Additional configurations.
+    - betas: List of beta values for add-beta smoothing.
+    - input_seq, output_seq: Optional fixed input-output pairs.
+    - ctx: Context manager for evaluations (e.g., amp/autocast).
+    """
+
+    assert not model.training, "Model should be in eval mode"
+    assert P is not None, "Transition matrix P is required"
+
     if betas is None:
         betas = [1]
-    
+
+    # Load or generate batch
     if input_seq is not None and output_seq is not None:
         x = input_seq[:, :sequence_length]
         y = output_seq[:, :sequence_length]
     else:
-        x, y = get_batch(P, type, order, sequence_length, 1, generator, extra_args)
+        x, y = get_batch(P, "weather", extra_args.order, sequence_length, 1, extra_args, start_index=0)
 
-    # Get model estimation
+    # Get model probability estimates
     with ctx:
         outputs = model(x, targets=y, save_weights=True)
-    probs = F.softmax(outputs['logits'], dim=-1)
-    xb = x[0].float()
-    probsb = probs[0, order-1:]
-    powers = torch.Tensor([2**i for i in reversed(range(order))]).to(extra_args.device)
-    idx = F.conv1d(xb.view(1, -1), powers.view(1, 1, -1)).squeeze()
-    prob_vec = []
-    for i in range(2**order):
-        vec = probsb[idx == i][:,1] # estimated p
-        prob_vec.append(vec)
+    probs = F.softmax(outputs['logits'], dim=-1)  # Convert logits to probabilities
 
-    # Get (windowed) empirical add-beta estimator
+    # Store probability vectors
+    prob_vec = []
+    for feature_idx in range(x.shape[-1]):  # Iterate over 6 weather features
+        prob_vec.append(probs[..., feature_idx])  # Extract probabilities per feature
+
+    # Compute empirical estimations
     if windows is None:
         windows = [0]
     est_vec = []
     if windows == [0]:
-        est_vec.append(empirical_est(x, y, type, order))
+        est_vec.append(empirical_est(x, y, extra_args.order))  # Baseline estimate
         beta_vec = []
         for beta in betas:
-            beta_est = empirical_est(x, y, type, order, beta=beta)
-            err = 0
-            for i in range(2**order):
-                err += torch.linalg.norm(prob_vec[i] - beta_est[i], ord=1)
+            beta_est = empirical_est(x, y, extra_args.order, beta=beta)
+            err = sum(torch.linalg.norm(prob_vec[i] - beta_est[i], ord=1) for i in range(len(prob_vec)))
             beta_vec.append(err)
     else:
         beta_vec = None
         for w in windows:
-            est_vec.append(empirical_est(x, y, type, order, window=w))
-    
+            est_vec.append(empirical_est(x, y, extra_args.order, window=w))
+
     return prob_vec, est_vec, beta_vec
 
 @torch.no_grad()
